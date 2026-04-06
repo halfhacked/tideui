@@ -121,11 +121,13 @@ function BottomSheetInner({
   // -----------------------------------------------------------------------
   const [mounted, setMounted] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [hasEntered, setHasEntered] = useState(false); // entry animation done
 
   useEffect(() => {
     if (isOpen) {
       setMounted(true);
       setIsClosing(false);
+      setHasEntered(false);
     } else if (mounted) {
       // Begin exit animation
       setIsClosing(true);
@@ -136,9 +138,9 @@ function BottomSheetInner({
   const handleAnimationEnd = useCallback((e: React.AnimationEvent) => {
     // Only respond to animations on the sheet itself, not bubbled from children
     if (e.target !== e.currentTarget) return;
-    if (isClosing) {
-      setMounted(false);
-      setIsClosing(false);
+    if (!isClosing) {
+      // Entry animation finished
+      setHasEntered(true);
     }
   }, [isClosing]);
 
@@ -488,7 +490,7 @@ function BottomSheetInner({
           transition: `transform ${EXIT_DURATION}ms ease-out`,
         }
       : {
-          animation: 'tideui-slide-up 300ms ease-out',
+          ...(hasEntered ? {} : { animation: 'tideui-slide-up 300ms ease-out' }),
           transform: `translateY(${translateY}px)`,
           transition: transitionStyle || undefined,
         }),
