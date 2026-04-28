@@ -243,42 +243,45 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
     if (!isClosing) setHasEntered(true);
   }, [isClosing]);
 
-  // Exit transitionend — wait for the property that's actually transitioning.
-  // Also listens for `transitioncancel`: if the close-height write happens
-  // more than once in quick succession (consumer-driven re-renders, ResizeObserver
-  // callbacks during exit), the browser fires `transitioncancel` instead of
-  // `transitionend` and the sheet would otherwise stay mounted forever.
-  // Hard timeout fallback (EXIT_DURATION + slack) covers the case where
-  // neither event fires — most commonly when the sheet was already at the
-  // close target value (e.g. swipe-to-dismiss dragged height to 0 before
-  // onClose ran, so the close-height write is a no-op transition).
+  // Exit teardown — wait for the close transition to finish, then unmount.
+  // - Listen for `transitionend` (animation completes naturally) AND
+  //   `transitioncancel` (a consumer re-render or ResizeObserver callback
+  //   during exit re-applies the style and the browser fires cancel
+  //   instead of end). Either signals the close has finished as far as
+  //   we're concerned.
+  // - If the sheet is already at the close-target value when isClosing
+  //   flips (e.g. swipe-to-dismiss dragged height to ~0 before onClose
+  //   ran), no transition will fire at all. Detect that synchronously
+  //   and unmount on the next microtask so we don't hang on an event
+  //   that won't arrive.
   useEffect(() => {
     if (!isClosing) return;
     const sheet = sheetRef.current;
     if (!sheet) return;
+    const atCloseTarget = hasSnap
+      ? sheetHeightPxRef.current <= 0.5
+      : translateYRef.current >= sheet.getBoundingClientRect().height - 0.5;
+    if (atCloseTarget) {
+      queueMicrotask(() => {
+        setMounted(false);
+        setIsClosing(false);
+      });
+      return;
+    }
     const targetProp = hasSnap ? 'height' : 'transform';
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      sheet.removeEventListener('transitionend', onDone);
-      sheet.removeEventListener('transitioncancel', onDone);
-      clearTimeout(fallback);
-      setMounted(false);
-      setIsClosing(false);
-    };
     const onDone = (e: TransitionEvent) => {
       if (e.target !== sheet) return;
       if (e.propertyName !== targetProp) return;
-      finish();
+      sheet.removeEventListener('transitionend', onDone);
+      sheet.removeEventListener('transitioncancel', onDone);
+      setMounted(false);
+      setIsClosing(false);
     };
     sheet.addEventListener('transitionend', onDone);
     sheet.addEventListener('transitioncancel', onDone);
-    const fallback = setTimeout(finish, EXIT_DURATION + 50);
     return () => {
       sheet.removeEventListener('transitionend', onDone);
       sheet.removeEventListener('transitioncancel', onDone);
-      clearTimeout(fallback);
     };
   }, [isClosing, hasSnap]);
 
