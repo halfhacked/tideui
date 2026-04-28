@@ -243,7 +243,11 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
     if (!isClosing) setHasEntered(true);
   }, [isClosing]);
 
-  // Exit transitionend — wait for the property that's actually transitioning
+  // Exit transitionend — wait for the property that's actually transitioning.
+  // Also listens for `transitioncancel`: if the close-height write happens
+  // more than once in quick succession (consumer-driven re-renders, ResizeObserver
+  // callbacks during exit), the browser fires `transitioncancel` instead of
+  // `transitionend` and the sheet would otherwise stay mounted forever.
   useEffect(() => {
     if (!isClosing) return;
     const sheet = sheetRef.current;
@@ -253,11 +257,16 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
       if (e.target !== sheet) return;
       if (e.propertyName !== targetProp) return;
       sheet.removeEventListener('transitionend', onDone);
+      sheet.removeEventListener('transitioncancel', onDone);
       setMounted(false);
       setIsClosing(false);
     };
     sheet.addEventListener('transitionend', onDone);
-    return () => sheet.removeEventListener('transitionend', onDone);
+    sheet.addEventListener('transitioncancel', onDone);
+    return () => {
+      sheet.removeEventListener('transitionend', onDone);
+      sheet.removeEventListener('transitioncancel', onDone);
+    };
   }, [isClosing, hasSnap]);
 
   // -----------------------------------------------------------------------

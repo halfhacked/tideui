@@ -143,11 +143,16 @@ var BottomSheetInner = (0, import_react.forwardRef)(function BottomSheetInner2({
       if (e.target !== sheet) return;
       if (e.propertyName !== targetProp) return;
       sheet.removeEventListener("transitionend", onDone);
+      sheet.removeEventListener("transitioncancel", onDone);
       setMounted(false);
       setIsClosing(false);
     };
     sheet.addEventListener("transitionend", onDone);
-    return () => sheet.removeEventListener("transitionend", onDone);
+    sheet.addEventListener("transitioncancel", onDone);
+    return () => {
+      sheet.removeEventListener("transitionend", onDone);
+      sheet.removeEventListener("transitioncancel", onDone);
+    };
   }, [isClosing, hasSnap]);
   const [currentSnapIndex, setCurrentSnapIndex] = (0, import_react.useState)(defaultSnapPoint);
   const currentSnapIndexRef = (0, import_react.useRef)(defaultSnapPoint);
