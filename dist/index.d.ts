@@ -54,6 +54,16 @@ interface BottomSheetHandle {
     snapTo(index: number, opts?: {
         animate?: boolean;
     }): void;
+    /** Recompute the content-fit ceiling synchronously. Call this after
+     *  imperatively swapping the sheet's children (e.g. switching between
+     *  tabs that render very different amounts of DOM). Without it, the
+     *  internal `ResizeObserver` re-measure runs asynchronously, and a
+     *  touch arriving before that callback would clamp drag against the
+     *  previous content's max for one full gesture.
+     *
+     *  Safely no-ops when the sheet is not mounted, is closing, has no
+     *  `snapPoints`, or is in the middle of a drag/snap transition. */
+    measure(): void;
 }
 /** Wrap your header content in this to make it the drag target when swipeTarget="header" */
 declare function Header({ children, className, style }: {

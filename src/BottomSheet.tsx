@@ -46,6 +46,21 @@ function resolveSettledIdx(targetHeight: number, effective: number[]): number {
   return effective.length - 1;
 }
 
+/** The single source of truth for clamping snap heights to the measured
+ *  content ceiling. Called from both the render-time `useMemo` and the
+ *  synchronous ref-write inside `measureContent`; routing both through
+ *  the same function prevents the two paths from drifting (e.g. one
+ *  computing clamped while the other holds the raw values, which would
+ *  let `handleTouchMove` clamp against stale max for one frame). */
+function computeEffective(
+  snapHeightsPx: number[] | null,
+  contentRequiredPx: number | null,
+): number[] | null {
+  if (!snapHeightsPx) return null;
+  if (contentRequiredPx == null || contentRequiredPx <= 0) return snapHeightsPx;
+  return snapHeightsPx.map(h => Math.min(h, contentRequiredPx));
+}
+
 /** Return the next index greater than `fromIdx` whose effective height is
  *  strictly larger than `effective[fromIdx]`. If no such index exists (all
  *  higher snaps have collapsed to the current effective height), returns
@@ -151,6 +166,16 @@ export interface BottomSheetHandle {
    *  @param opts   `animate: false` moves instantly without the spring.
    *                `onSnap` still fires. Default: animated. */
   snapTo(index: number, opts?: { animate?: boolean }): void;
+  /** Recompute the content-fit ceiling synchronously. Call this after
+   *  imperatively swapping the sheet's children (e.g. switching between
+   *  tabs that render very different amounts of DOM). Without it, the
+   *  internal `ResizeObserver` re-measure runs asynchronously, and a
+   *  touch arriving before that callback would clamp drag against the
+   *  previous content's max for one full gesture.
+   *
+   *  Safely no-ops when the sheet is not mounted, is closing, has no
+   *  `snapPoints`, or is in the middle of a drag/snap transition. */
+  measure(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,11 +237,10 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
    *  array every downstream consumer uses — initial height, drag clamp,
    *  drag-release snap picker, imperative `snapTo`, pill advance, backdrop
    *  opacity denominator, exit transition. */
-  const effectiveSnapHeightsPx = useMemo(() => {
-    if (!snapHeightsPx) return null;
-    if (contentRequiredPx == null || contentRequiredPx <= 0) return snapHeightsPx;
-    return snapHeightsPx.map(h => Math.min(h, contentRequiredPx));
-  }, [snapHeightsPx, contentRequiredPx]);
+  const effectiveSnapHeightsPx = useMemo(
+    () => computeEffective(snapHeightsPx, contentRequiredPx),
+    [snapHeightsPx, contentRequiredPx],
+  );
   const effectiveSnapHeightsPxRef = useRef<number[] | null>(null);
   effectiveSnapHeightsPxRef.current = effectiveSnapHeightsPx;
 
@@ -243,17 +267,11 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
     if (!isClosing) setHasEntered(true);
   }, [isClosing]);
 
-  // Exit teardown — wait for the close transition to finish, then unmount.
-  // - Listen for `transitionend` (animation completes naturally) AND
-  //   `transitioncancel` (a consumer re-render or ResizeObserver callback
-  //   during exit re-applies the style and the browser fires cancel
-  //   instead of end). Either signals the close has finished as far as
-  //   we're concerned.
-  // - If the sheet is already at the close-target value when isClosing
-  //   flips (e.g. swipe-to-dismiss dragged height to ~0 before onClose
-  //   ran), no transition will fire at all. Detect that synchronously
-  //   and unmount on the next microtask so we don't hang on an event
-  //   that won't arrive.
+  // Exit teardown. `transitioncancel` covers the case where a re-render or
+  // ResizeObserver callback during exit re-applies the close-height style;
+  // the at-target short-circuit covers swipe-to-dismiss landing the sheet
+  // at 0px before `onClose`, so the close-height write is a no-op transition
+  // that fires neither end nor cancel.
   useEffect(() => {
     if (!isClosing) return;
     const sheet = sheetRef.current;
@@ -379,9 +397,7 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
       const child = sheet.children[i] as HTMLElement;
       const cs = getComputedStyle(child);
       if (parseFloat(cs.flexGrow || '0') > 0) {
-        // Sync ref alongside the state update so synchronous readers (touch
-        // handlers) see the unclamped heights immediately, not on next render.
-        effectiveSnapHeightsPxRef.current = snapHeightsPx ?? null;
+        effectiveSnapHeightsPxRef.current = computeEffective(snapHeightsPx, null);
         setContentRequiredPx(prev => (prev == null ? prev : null));
         return;
       }
@@ -399,13 +415,11 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
     sheet.style.height = savedHeight;
     sheet.style.transition = savedTransition;
 
-    // Sync ref so a touchstart-triggered measure makes the new effective
-    // heights visible to handleTouchMove on the same gesture (state-driven
-    // re-render is async and would otherwise leave the touchmove clamping
+    // Sync ref so a touchstart-triggered measure makes the fresh heights
+    // visible to handleTouchMove on the same gesture (the state-driven
+    // re-render is async and would otherwise clamp the in-flight drag
     // against the previous content's max).
-    if (snapHeightsPx) {
-      effectiveSnapHeightsPxRef.current = snapHeightsPx.map(h => Math.min(h, natural));
-    }
+    effectiveSnapHeightsPxRef.current = computeEffective(snapHeightsPx, natural);
     setContentRequiredPx(prev =>
       (prev != null && Math.abs(prev - natural) < 0.5) ? prev : natural,
     );
@@ -562,7 +576,11 @@ const BottomSheetInner = forwardRef<BottomSheetHandle, BottomSheetProps>(functio
         });
       }
     },
-  }), [hasSnap, snapHeightsPx, sortedSnaps, mounted, isClosing, settleAndFireSnap]);
+    measure() {
+      if (!hasSnap || !mounted || isClosing) return;
+      measureContent();
+    },
+  }), [hasSnap, snapHeightsPx, sortedSnaps, mounted, isClosing, settleAndFireSnap, measureContent]);
 
   // Escape
   useEffect(() => {

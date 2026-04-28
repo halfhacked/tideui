@@ -42,6 +42,11 @@ function resolveSettledIdx(targetHeight, effective) {
   }
   return effective.length - 1;
 }
+function computeEffective(snapHeightsPx, contentRequiredPx) {
+  if (!snapHeightsPx) return null;
+  if (contentRequiredPx == null || contentRequiredPx <= 0) return snapHeightsPx;
+  return snapHeightsPx.map((h) => Math.min(h, contentRequiredPx));
+}
 function nextDistinctIdx(fromIdx, effective) {
   const current = effective[fromIdx];
   for (let i = fromIdx + 1; i < effective.length; i++) {
@@ -111,11 +116,10 @@ var BottomSheetInner = (0, import_react.forwardRef)(function BottomSheetInner2({
     [hasSnap, sortedSnaps, viewportHeight]
   );
   const [contentRequiredPx, setContentRequiredPx] = (0, import_react.useState)(null);
-  const effectiveSnapHeightsPx = (0, import_react.useMemo)(() => {
-    if (!snapHeightsPx) return null;
-    if (contentRequiredPx == null || contentRequiredPx <= 0) return snapHeightsPx;
-    return snapHeightsPx.map((h) => Math.min(h, contentRequiredPx));
-  }, [snapHeightsPx, contentRequiredPx]);
+  const effectiveSnapHeightsPx = (0, import_react.useMemo)(
+    () => computeEffective(snapHeightsPx, contentRequiredPx),
+    [snapHeightsPx, contentRequiredPx]
+  );
   const effectiveSnapHeightsPxRef = (0, import_react.useRef)(null);
   effectiveSnapHeightsPxRef.current = effectiveSnapHeightsPx;
   const [mounted, setMounted] = (0, import_react.useState)(false);
@@ -218,7 +222,7 @@ var BottomSheetInner = (0, import_react.forwardRef)(function BottomSheetInner2({
       const child = sheet.children[i];
       const cs = getComputedStyle(child);
       if (parseFloat(cs.flexGrow || "0") > 0) {
-        effectiveSnapHeightsPxRef.current = snapHeightsPx ?? null;
+        effectiveSnapHeightsPxRef.current = computeEffective(snapHeightsPx, null);
         setContentRequiredPx((prev) => prev == null ? prev : null);
         return;
       }
@@ -230,9 +234,7 @@ var BottomSheetInner = (0, import_react.forwardRef)(function BottomSheetInner2({
     const natural = sheet.offsetHeight;
     sheet.style.height = savedHeight;
     sheet.style.transition = savedTransition;
-    if (snapHeightsPx) {
-      effectiveSnapHeightsPxRef.current = snapHeightsPx.map((h) => Math.min(h, natural));
-    }
+    effectiveSnapHeightsPxRef.current = computeEffective(snapHeightsPx, natural);
     setContentRequiredPx(
       (prev) => prev != null && Math.abs(prev - natural) < 0.5 ? prev : natural
     );
@@ -326,8 +328,12 @@ var BottomSheetInner = (0, import_react.forwardRef)(function BottomSheetInner2({
           });
         });
       }
+    },
+    measure() {
+      if (!hasSnap || !mounted || isClosing) return;
+      measureContent();
     }
-  }), [hasSnap, snapHeightsPx, sortedSnaps, mounted, isClosing, settleAndFireSnap]);
+  }), [hasSnap, snapHeightsPx, sortedSnaps, mounted, isClosing, settleAndFireSnap, measureContent]);
   (0, import_react.useEffect)(() => {
     if (!mounted || isClosing) return;
     const handleEscape = (e) => {
